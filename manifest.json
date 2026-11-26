@@ -1,51 +1,55 @@
 {
   "id": "io.github.y1ad.soundcloud",
   "name": "SoundCloud",
-  "version": "1.1.0",
-  "versionCode": 2,
+  "version": "1.2.0",
+  "versionCode": 3,
   "apiVersion": 1,
   "author": "y1ad",
   "description": "Plays songs from SoundCloud (full, free versions) and has its own page to search and play tracks that only exist on SoundCloud.",
   "main": "main.js",
   "category": "playback",
   "tags": ["soundcloud", "audio", "streaming"],
-  "changelog": "New: its own page (Extensions > SoundCloud > Open its page) to search SoundCloud and play what only exists there. Experimental: it plays only while the page is open.",
+  "changelog": "Now uses a small Vercel API to find the SoundCloud client ID and the stream, so it works much more reliably (SoundCloud now serves most tracks as HLS/AAC, which is supported). If that API is down it falls back to asking SoundCloud directly. The experimental page also uses the API.",
   "welcome": {
     "message": "SoundCloud gives the audio of the songs you play, when it has a close match. For what only exists on SoundCloud, open its page and search there.",
     "steps": ["In Settings > Playback, put SoundCloud first in the audio order.", "For SoundCloud-only tracks: Extensions > SoundCloud > Open its page."]
   },
   "actions": [
     { "name": "audio.source", "why": "Plays each song's audio from SoundCloud" },
-    { "name": "network", "hosts": ["*.soundcloud.com", "*.sndcdn.com"], "why": "Searches SoundCloud and opens its audio streams" },
+    { "name": "network", "hosts": ["*.vercel.app", "*.soundcloud.com", "*.sndcdn.com"], "why": "Asks the SoundCloud API (on Vercel) and SoundCloud for tracks and audio streams" },
     { "name": "webview.page", "why": "A page to search SoundCloud and play its tracks" },
-    { "name": "storage", "why": "Keeps the SoundCloud client ID it found" },
+    { "name": "storage", "why": "Keeps the SoundCloud client ID it found (fallback mode)" },
     { "name": "notify", "why": "Confirms when the client ID is looked up again" },
-    { "name": "settings.page", "why": "Match strictness and client ID" }
+    { "name": "settings.page", "why": "Match strictness, API address and client ID" }
   ],
   "settings": [
     { "key": "match", "type": "choice", "label": "How strict the match is", "description": "How close a SoundCloud upload must be to the song (title, artist, length).", "options": ["Strict", "Normal", "Loose"], "default": "Normal", "section": "playback" },
-    { "key": "client_id", "type": "text", "label": "Client ID (optional)", "description": "Leave empty: it is looked up by itself." },
+    { "key": "api_url", "type": "text", "label": "API address (optional)", "description": "Leave empty to use the built-in one. Put your own Vercel address here if you deploy your own copy of myspoti-soundcloud-api." },
+    { "key": "api_key", "type": "text", "label": "API key (optional)", "description": "Only if you set API_KEY in your own deployment." },
+    { "key": "client_id", "type": "text", "label": "Client ID (optional, fallback only)", "description": "Leave empty: it is looked up by itself." },
     { "key": "reset", "type": "button", "label": "Look up the client ID again" }
   ],
   "translations": {
     "es": {
       "description": "Reproduce canciones desde SoundCloud (versiones completas y gratis) y tiene su propia página para buscar y reproducir pistas que solo existen en SoundCloud.",
-      "changelog": "Nuevo: su propia página (Extensiones > SoundCloud > Abrir su página) para buscar en SoundCloud y reproducir lo que solo existe allá. Experimental: suena solo mientras la página está abierta.",
+      "changelog": "Ahora usa una pequeña API en Vercel para encontrar el client ID de SoundCloud y el audio, así que funciona mucho mejor (SoundCloud ya sirve casi todo como HLS/AAC, y eso está soportado). Si esa API falla, vuelve a preguntarle directo a SoundCloud. La página experimental también usa la API.",
       "welcome": {
         "message": "SoundCloud pone el audio de las canciones que reproduces, cuando encuentra una coincidencia cercana. Para lo que solo existe en SoundCloud, abre su página y busca ahí.",
         "steps": ["En Ajustes > Reproducción, pon SoundCloud primero en el orden de audio.", "Para pistas solo de SoundCloud: Extensiones > SoundCloud > Abrir su página."]
       },
       "actions": {
         "audio.source": "Reproduce el audio de cada canción desde SoundCloud",
-        "network": "Busca en SoundCloud y abre sus transmisiones de audio",
+        "network": "Consulta la API de SoundCloud (en Vercel) y SoundCloud para obtener pistas y transmisiones de audio",
         "webview.page": "Una página para buscar en SoundCloud y reproducir sus pistas",
-        "storage": "Guarda el client ID de SoundCloud que encontró",
+        "storage": "Guarda el client ID de SoundCloud que encontró (modo de respaldo)",
         "notify": "Avisa cuando vuelve a buscar el client ID",
-        "settings.page": "Qué tan estricta es la coincidencia y el client ID"
+        "settings.page": "Qué tan estricta es la coincidencia, la dirección de la API y el client ID"
       },
       "settings": {
         "match": { "label": "Qué tan estricta es la coincidencia", "description": "Qué tan parecido debe ser lo subido a SoundCloud a la canción (título, artista, duración).", "options": ["Estricta", "Normal", "Amplia"] },
-        "client_id": { "label": "Client ID (opcional)", "description": "Déjalo vacío: se busca solo." },
+        "api_url": { "label": "Dirección de la API (opcional)", "description": "Déjalo vacío para usar la incluida. Pon aquí tu dirección de Vercel si despliegas tu propia copia de myspoti-soundcloud-api." },
+        "api_key": { "label": "Clave de la API (opcional)", "description": "Solo si pusiste API_KEY en tu propio despliegue." },
+        "client_id": { "label": "Client ID (opcional, solo respaldo)", "description": "Déjalo vacío: se busca solo." },
         "reset": { "label": "Buscar el client ID otra vez" }
       }
     }

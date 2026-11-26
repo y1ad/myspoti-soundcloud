@@ -6,10 +6,13 @@
 // 2) Its own page (experimental): a SoundCloud search with its own player, for what only exists on
 //    SoundCloud. The extension API only opens songs of the app's catalogs, so this plays inside the
 //    page, and only while the page is open.
-// SoundCloud has no open API for new apps: this uses its public web API with a "client_id" that
-// is looked up from the site's own scripts (or typed in the settings). It can break when they change.
+// Both go through a small Vercel API (github.com/y1ad/myspoti-soundcloud-api) that looks up the
+// SoundCloud client_id and the stream on its own server, so the phone does not have to. If that API
+// is down, the audio source falls back to asking SoundCloud directly with a client_id found on the
+// phone (or typed in the settings). SoundCloud has no open API for new apps: it can break when they change.
 var API = 'https://api-v2.soundcloud.com';
 var HOME = 'https://soundcloud.com';
+var DEFAULT_API = 'https://myspoti-soundcloud-api-ameeyaal67-4785.vercel.app';
 var CID_TTL_MS = 3 * 24 * 3600 * 1000;
 var PAGE_SIZE = 20;
 var TOLERANCE = { Strict: 4000, Normal: 8000, Loose: 20000 };
@@ -96,7 +99,67 @@ function fetchBodies(urls) {
   return urls.map(function (u) { var r = req(u, 8000); return r.ok ? String(r.body || '') : ''; });
 }
 
-// ── The client ID ──
+// ── The Vercel API (preferred) ──
+
+function apiBase() {
+  var v = String(myspoti.settings.get('api_url') || '').replace(/\s+/g, '').replace(/\/+$/, '');
+  return v || DEFAULT_API;
+}
+
+function apiGet(path, params, timeout) {
+  var p = {};
+  Object.keys(params || {}).forEach(function (k) { p[k] = params[k]; });
+  var key = String(myspoti.settings.get('api_key') || '').replace(/\s+/g, '');
+  if (key) p.key = key;
+  return req(apiBase() + path + '?' + myspoti.query(p), timeout);
+}
+
+// An item of the API's search, in the shape pick() expects.
+function adaptItem(it) {
+  return {
+    id: it.id,
+    title: it.title,
+    duration: it.durationMs,
+    streamable: true,
+    policy: 'ALLOW',
+    media: { transcodings: [{}] },
+    user: { username: it.uploader },
+    publisher_metadata: { artist: it.artist, isrc: it.isrc },
+    _item: it
+  };
+}
+
+// The audio through the API: the answer, or { fail: true } when the API itself is not working.
+function viaApi(track) {
+  var q = ((artistNames(track)[0] || '') + ' ' + core(track.title)).replace(/\s+/g, ' ').trim();
+  if (!q) return none('not-found');
+  var r = apiGet('/api/search', { q: q, limit: 20 }, 9000);
+  if (r.error || r.status === 0 || r.status >= 500 || r.status === 401 || r.status === 403 || r.status === 404) return { fail: true };
+  if (r.status === 429) return none('rate-limited', { retryAfterMs: 60000 });
+  if (!r.ok) return { fail: true };
+  var data;
+  try { data = r.json(); } catch (e) { return { fail: true }; }
+  var c = pick(track, ((data && data.items) || []).map(adaptItem));
+  if (!c) return none('not-found');
+
+  var s = apiGet('/api/stream', { id: c._item.id, format: 'json' }, 9000);
+  if (s.error || s.status === 0 || s.status >= 500) return { fail: true };
+  if (s.status === 429) return none('rate-limited', { retryAfterMs: 60000 });
+  if (!s.ok) return none('not-found');
+  var b;
+  try { b = s.json(); } catch (e) { return { fail: true }; }
+  if (!b || !b.url) return none('not-found');
+  var hls = /mpegurl/i.test(String(b.mimeType || ''));
+  return {
+    url: b.url,
+    mimeType: b.mimeType || (hls ? 'application/x-mpegURL' : 'audio/mpeg'),
+    durationMs: c.duration,
+    expiresInMs: 240000,
+    source: 'SoundCloud · ' + (hls ? 'AAC (HLS)' : 'MP3')
+  };
+}
+
+// ── The client ID (only for the fallback that asks SoundCloud directly) ──
 
 // Reads it from the scripts SoundCloud's own home page loads (its last ones hold it).
 function discover() {
@@ -135,11 +198,6 @@ function clientId(force) {
     return found;
   }
   return force ? null : (saved || null);
-}
-
-// The client ID already known, never looked up (the page's hooks have 3 s).
-function cachedId() {
-  return typedId() || myspoti.storage.get('cid') || null;
 }
 
 function forgetId() {
@@ -247,26 +305,21 @@ function progressive(c) {
   return null;
 }
 
-// The stream to ask for: a plain MP3 when there is one, else HLS.
+// The stream to ask for: a plain MP3 when there is one, else HLS (best AAC first).
 function chooseTranscoding(c) {
   var t = (c.media && c.media.transcodings) || [];
-  function find(protocol, re) {
-    for (var i = 0; i < t.length; i++) {
-      var f = t[i].format || {};
-      if (f.protocol === protocol && re.test(String(f.mime_type || '') + ' ' + String(t[i].preset || ''))) return t[i];
-    }
-    return null;
-  }
+  function rate(x) { var m = /(\d+)k/.exec(String(x.preset || '')); return m ? Number(m[1]) : 0; }
   var p = progressive(c);
   if (p) return { t: p, mime: 'audio/mpeg', label: 'SoundCloud · MP3' };
-  var a = find('hls', /mp4a|aac/i);
-  if (a) return { t: a, mime: 'application/x-mpegURL', label: 'SoundCloud · AAC (HLS)' };
-  var h = find('hls', /mpeg|mp3/i);
-  if (h) return { t: h, mime: 'application/x-mpegURL', label: 'SoundCloud · MP3 (HLS)' };
+  var aac = t.filter(function (x) {
+    var f = x.format || {};
+    return f.protocol === 'hls' && /mp4a|aac/i.test(String(f.mime_type || '') + ' ' + String(x.preset || ''));
+  }).sort(function (a, b) { return rate(b) - rate(a); });
+  if (aac.length) return { t: aac[0], mime: 'application/x-mpegURL', label: 'SoundCloud · AAC (HLS)' };
   return null;
 }
 
-// One try with [cid]: the answer, or { retry: true } when SoundCloud refused the client ID.
+// One direct try with [cid]: the answer, or { retry: true } when SoundCloud refused the client ID.
 function attempt(track, cid) {
   var q = ((artistNames(track)[0] || '') + ' ' + core(track.title)).replace(/\s+/g, ' ').trim();
   if (!q) return none('not-found');
@@ -298,7 +351,8 @@ function attempt(track, cid) {
   return { url: u, mimeType: ch.mime, durationMs: c.duration, expiresInMs: 240000, source: ch.label };
 }
 
-myspoti.provide('audio-source', function (track) {
+// The old way, used only when the Vercel API is down: ask SoundCloud directly from the phone.
+function direct(track) {
   var cid = clientId(false);
   if (!cid) return none('error', { detail: tr('noid') });
   var out = attempt(track, cid);
@@ -310,50 +364,45 @@ myspoti.provide('audio-source', function (track) {
   }
   if (out && out.retry) return none('error', { detail: 'SoundCloud refused the client ID' });
   return out;
+}
+
+myspoti.provide('audio-source', function (track) {
+  var out = viaApi(track);
+  if (out && out.fail) return direct(track);
+  return out;
 });
 
 // ── Its own page ──
 
-// What the page asks (its message hook has 3 s: only requests already known, never a look-up).
+// What the page asks (its message hook has 3 s).
 function pageSearch(q, offset) {
   q = q.replace(/\s+/g, ' ').trim();
   if (!q) return { type: 'results', items: [], more: false };
-  var cid = cachedId();
-  if (!cid) { myspoti.work.whenOnline(); return { type: 'wait' }; }
-  var r = req(API + '/search/tracks?' + myspoti.query({
-    q: q, client_id: cid, limit: PAGE_SIZE, offset: offset, linked_partitioning: 1
-  }), 2500);
+  var r = apiGet('/api/search', { q: q, limit: PAGE_SIZE, offset: offset }, 2800);
   if (r.error) return { type: 'error', code: 'network' };
-  if (r.status === 401 || r.status === 403) { forgetId(); myspoti.work.whenOnline(); return { type: 'wait' }; }
   if (!r.ok) return { type: 'error', code: 'http ' + r.status };
   var data;
   try { data = r.json(); } catch (e) { return { type: 'error', code: 'answer' }; }
-  var items = [];
-  ((data && data.collection) || []).forEach(function (c) {
-    if (!c || c.streamable === false) return;
-    if (c.policy && c.policy !== 'ALLOW' && c.policy !== 'MONETIZE') return;
-    var t = progressive(c);
-    if (!t || !t.url) return;
-    items.push({
-      id: c.id,
-      title: String(c.title || ''),
-      user: String((c.user && c.user.username) || ''),
-      dur: c.duration || 0,
-      art: String(c.artwork_url || (c.user && c.user.avatar_url) || '').replace('-large.', '-t200x200.'),
-      t: t.url,
-      auth: c.track_authorization || ''
-    });
+  var items = ((data && data.items) || []).map(function (it) {
+    return {
+      id: it.id,
+      title: String(it.title || ''),
+      user: String(it.uploader || it.artist || ''),
+      dur: it.durationMs || 0,
+      art: String(it.artwork || ''),
+      t: String(it.id),
+      auth: ''
+    };
   });
-  return { type: 'results', items: items, more: !!(data && data.next_href) };
+  return { type: 'results', items: items, more: !!(data && data.next !== null && data.next !== undefined) };
 }
 
-function pageStream(t, auth) {
-  if (t.indexOf('https://api-v2.soundcloud.com/media/') !== 0) return { type: 'error', code: 'bad' };
-  var cid = cachedId();
-  if (!cid) { myspoti.work.whenOnline(); return { type: 'wait' }; }
-  var s = req(t + (t.indexOf('?') >= 0 ? '&' : '?') + myspoti.query({ client_id: cid, track_authorization: auth }), 2500);
+// [t] is the track id the API gave.
+function pageStream(t) {
+  var id = String(t || '').replace(/\D/g, '');
+  if (!id) return { type: 'error', code: 'bad' };
+  var s = apiGet('/api/stream', { id: id, format: 'json' }, 2800);
   if (s.error) return { type: 'error', code: 'network' };
-  if (s.status === 401 || s.status === 403) { forgetId(); myspoti.work.whenOnline(); return { type: 'wait' }; }
   if (!s.ok) return { type: 'error', code: 'http ' + s.status };
   var u = null;
   try { u = s.json().url; } catch (e) {}
@@ -366,19 +415,17 @@ myspoti.provide('message', function (m) {
   var out = null;
   var type = String(m.type);
   if (type === 'init') {
-    var has = !!cachedId();
-    if (!has) myspoti.work.whenOnline();
-    out = { type: 'init', ok: has };
+    out = { type: 'init', ok: true };
   } else if (type === 'search') {
     out = pageSearch(String(m.q || ''), Number(m.offset) || 0);
   } else if (type === 'stream') {
-    out = pageStream(String(m.t || ''), String(m.auth || ''));
+    out = pageStream(String(m.t || ''));
   }
   if (out) out.rid = m.rid;
   return out;
 });
 
-// The client ID is looked up here (30 s), when the page asked for it and the phone has a network.
+// The client ID is looked up here (30 s) when the phone has a network: only the fallback needs it.
 myspoti.on('online', function () {
   var cid = null;
   try { cid = clientId(true); } catch (e) {}
