@@ -1,0 +1,51 @@
+{
+  "id": "io.github.y1ad.soundcloud",
+  "name": "SoundCloud",
+  "version": "1.0.0",
+  "versionCode": 1,
+  "apiVersion": 1,
+  "author": "y1ad",
+  "description": "Plays songs from SoundCloud: it looks each song up there and streams the full, free version when it finds a close match.",
+  "main": "main.js",
+  "category": "playback",
+  "tags": ["soundcloud", "audio", "streaming"],
+  "changelog": "First version.",
+  "welcome": {
+    "message": "SoundCloud gives the audio of the songs you play, when it has a close match. It does not browse SoundCloud: you search and play as usual.",
+    "steps": ["In Settings > Playback, put SoundCloud first in the audio order."]
+  },
+  "actions": [
+    { "name": "audio.source", "why": "Plays each song's audio from SoundCloud" },
+    { "name": "network", "hosts": ["*.soundcloud.com", "*.sndcdn.com"], "why": "Searches SoundCloud and opens its audio streams" },
+    { "name": "storage", "why": "Keeps the SoundCloud client ID it found" },
+    { "name": "notify", "why": "Confirms when the client ID is looked up again" },
+    { "name": "settings.page", "why": "Match strictness and client ID" }
+  ],
+  "settings": [
+    { "key": "match", "type": "choice", "label": "How strict the match is", "description": "How close a SoundCloud upload must be to the song (title, artist, length).", "options": ["Strict", "Normal", "Loose"], "default": "Normal", "section": "playback" },
+    { "key": "client_id", "type": "text", "label": "Client ID (optional)", "description": "Leave empty: it is looked up by itself." },
+    { "key": "reset", "type": "button", "label": "Look up the client ID again" }
+  ],
+  "translations": {
+    "es": {
+      "description": "Reproduce canciones desde SoundCloud: busca cada canción allá y la transmite completa y gratis cuando encuentra una coincidencia cercana.",
+      "changelog": "Primera versión.",
+      "welcome": {
+        "message": "SoundCloud pone el audio de las canciones que reproduces, cuando encuentra una coincidencia cercana. No navega SoundCloud: buscas y reproduces como siempre.",
+        "steps": ["En Ajustes > Reproducción, pon SoundCloud primero en el orden de audio."]
+      },
+      "actions": {
+        "audio.source": "Reproduce el audio de cada canción desde SoundCloud",
+        "network": "Busca en SoundCloud y abre sus transmisiones de audio",
+        "storage": "Guarda el client ID de SoundCloud que encontró",
+        "notify": "Avisa cuando vuelve a buscar el client ID",
+        "settings.page": "Qué tan estricta es la coincidencia y el client ID"
+      },
+      "settings": {
+        "match": { "label": "Qué tan estricta es la coincidencia", "description": "Qué tan parecido debe ser lo subido a SoundCloud a la canción (título, artista, duración).", "options": ["Estricta", "Normal", "Amplia"] },
+        "client_id": { "label": "Client ID (opcional)", "description": "Déjalo vacío: se busca solo." },
+        "reset": { "label": "Buscar el client ID otra vez" }
+      }
+    }
+  }
+}
